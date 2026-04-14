@@ -385,26 +385,9 @@ func buildListTasksQuery(orderBy, orderDir string) string {
 		direction = "ASC"
 	}
 
-	needsTimes := orderBy == "startedAt" || orderBy == "finishedAt" || orderBy == "duration"
-
-	lateralJoins := ""
-	if needsTimes {
-		lateralJoins = `
-LEFT JOIN LATERAL (
-    SELECT MAX(e.event_timestamp) AS started_at
-    FROM v1_task_events_olap e
-    WHERE e.task_id = t.id AND e.tenant_id = t.tenant_id
-      AND e.task_inserted_at = t.inserted_at AND e.event_type = 'STARTED'
-) _st ON TRUE
-LEFT JOIN LATERAL (
-    SELECT MAX(e.event_timestamp) AS finished_at
-    FROM v1_task_events_olap e
-    WHERE e.task_id = t.id AND e.tenant_id = t.tenant_id
-      AND e.task_inserted_at = t.inserted_at
-      AND e.readable_status = ANY(ARRAY['COMPLETED', 'FAILED', 'CANCELLED']::v1_readable_status_olap[])
-) _fin ON TRUE`
-	}
-
+	// Sort expressions use denormalized columns on v1_tasks_olap directly,
+	// avoiding LATERAL JOINs to v1_task_events_olap which cause sequential
+	// scans at scale.
 	orderExpr := "t.inserted_at"
 	nullable := false
 
@@ -416,13 +399,13 @@ LEFT JOIN LATERAL (
 	case "workflow":
 		orderExpr = "t.workflow_id"
 	case "startedAt":
-		orderExpr = "_st.started_at"
+		orderExpr = "t.started_at"
 		nullable = true
 	case "finishedAt":
-		orderExpr = "_fin.finished_at"
+		orderExpr = "t.finished_at"
 		nullable = true
 	case "duration":
-		orderExpr = "(_fin.finished_at - _st.started_at)"
+		orderExpr = "t.duration_ms"
 		nullable = true
 	default:
 		orderExpr = "t.inserted_at"
@@ -443,7 +426,7 @@ LEFT JOIN LATERAL (
     t.id,
     t.inserted_at
 FROM
-    v1_tasks_olap t%s
+    v1_tasks_olap t
 WHERE
     t.tenant_id = $1::uuid
     AND t.inserted_at >= $2::timestamptz
@@ -483,7 +466,7 @@ WHERE
     )
 %s
 LIMIT $10::integer
-OFFSET $9::integer`, lateralJoins, orderClause)
+OFFSET $9::integer`, orderClause)
 }
 
 // ListTasksOlapWithSort executes a dynamic query for listing tasks with configurable sorting.

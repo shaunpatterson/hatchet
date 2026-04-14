@@ -189,6 +189,9 @@ CREATE TABLE v1_tasks_olap (
     dag_id BIGINT,
     dag_inserted_at TIMESTAMPTZ,
     parent_task_external_id UUID,
+    started_at TIMESTAMPTZ,
+    finished_at TIMESTAMPTZ,
+    duration_ms BIGINT,
 
     PRIMARY KEY (inserted_at, id, readable_status)
 ) PARTITION BY RANGE(inserted_at);
@@ -196,6 +199,11 @@ CREATE TABLE v1_tasks_olap (
 CREATE INDEX v1_tasks_olap_workflow_id_idx ON v1_tasks_olap (tenant_id, workflow_id);
 
 CREATE INDEX v1_tasks_olap_worker_id_idx ON v1_tasks_olap (tenant_id, latest_worker_id) WHERE latest_worker_id IS NOT NULL;
+
+CREATE INDEX idx_v1_tasks_olap_tenant_created ON v1_tasks_olap (tenant_id, inserted_at DESC, id DESC);
+CREATE INDEX idx_v1_tasks_olap_tenant_started ON v1_tasks_olap (tenant_id, started_at DESC NULLS LAST, inserted_at DESC, id DESC) WHERE started_at IS NOT NULL;
+CREATE INDEX idx_v1_tasks_olap_tenant_finished ON v1_tasks_olap (tenant_id, finished_at DESC NULLS LAST, inserted_at DESC, id DESC) WHERE finished_at IS NOT NULL;
+CREATE INDEX idx_v1_tasks_olap_tenant_duration ON v1_tasks_olap (tenant_id, duration_ms DESC NULLS LAST, inserted_at DESC, id DESC) WHERE duration_ms IS NOT NULL;
 
 SELECT create_v1_olap_partition_with_date_and_status('v1_tasks_olap', CURRENT_DATE);
 
